@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: assetbox
+  profiles:
+    active: dev
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
+assetbox:
+  cors:
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173
+  auth:
+    email-whitelist: []
+  storage:
+    local-root: uploads
