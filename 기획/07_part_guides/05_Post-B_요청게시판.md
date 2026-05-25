@@ -97,7 +97,7 @@ public interface RequestStatusService {
 - [ ] `request/` 정독, RequestStatus enum 확인
 - [ ] DM/User/Post 담당과 합의: 시스템 발신자 ID 보장 시점·방식
 
-### M1 (5/26 ~ 6/3): MVP
+### M1 (5/27 ~ 6/3): MVP
 - [ ] `create()` — status=REQUESTED, teamId 스냅샷
 - [ ] `update()` — status==REQUESTED 일 때만 허용 (그 외 400)
 - [ ] `assign()` — USER 본인 수락. 본문 없음. 이미 assignee 있으면 409. status 자동 IN_PROGRESS

@@ -94,7 +94,7 @@ public interface UserService {
 - [ ] 본 문서와 `04_api/03_명세서_User.md` / `04_api/02_...수정본.md` 대조
 - [ ] Form + OAuth2(Google/Naver) 구현 순서, 이메일 화이트리스트, `realName/major` 정책 확인
 
-### M1 (5/26 ~ 6/3): MVP
+### M1 (5/27 ~ 6/3): MVP
 - [ ] 회원가입: 이메일 화이트리스트, 중복 시 409 + `USER_EMAIL_DUPLICATED`
 - [ ] 로그인: BCrypt 비교 → JWT 발급, 실패 시 401 + `LOGIN_FAILED` (이메일 존재 여부는 노출 X), `profileRequired` 포함
 - [ ] `/me` GET/PUT, `UserResponse` 매핑 표준화 (avatarUrl 빌드: `/api/users/{id}/avatar` 또는 File URL)

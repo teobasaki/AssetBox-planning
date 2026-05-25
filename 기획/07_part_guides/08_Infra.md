@@ -73,7 +73,7 @@ prometheus.yml
 - [ ] `application-dev.yml` (H2, create-drop) / `application-prod.yml` (MySQL, validate) 분리 확인
 - [ ] CI 워크플로우: PR 시 `./gradlew clean build` 통과 보장
 
-### M1 (5/26 ~ 6/3): MVP 인프라
+### M1 (5/27 ~ 6/3): MVP 인프라
 - [ ] Docker Compose dev 환경 (백+프+H2 또는 MySQL 옵셔널)
 - [ ] CORS 화이트리스트 (`CORS_ALLOWED_ORIGINS`) 환경변수
 - [ ] GlobalExceptionHandler — 모든 예외 → ApiResponse 매핑

@@ -90,7 +90,7 @@ public interface FileService {
 - [ ] 기존 `file/` 패키지 정독, 인터페이스가 잘 분리되었는지 확인
 - [ ] 페어와 30분 미팅 — `FileService` / `FileStorageService` 인터페이스 합의
 
-### M1 (5/26 ~ 6/3): MVP
+### M1 (5/27 ~ 6/3): MVP
 - [ ] `FileService.save/saveAll` 트랜잭션 + 보상 로직 (디스크 cleanup) 견고화
 - [ ] 확장자 검증 상수 `FileExtensionPolicy` 추출, 변경 한 곳에서
 - [ ] 파일 조회 `GET /api/files/{fileId}`, 메타 `GET /api/files/{fileId}/meta` 구현

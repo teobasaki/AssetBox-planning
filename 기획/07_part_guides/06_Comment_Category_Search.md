@@ -77,7 +77,7 @@ public interface TagService {
 - [ ] 세 도메인의 기존 코드 정독
 - [ ] `CategorySeeder` 동작 확인 (대분류·중분류 데이터)
 
-### M1 (5/26 ~ 6/3): MVP
+### M1 (5/27 ~ 6/3): MVP
 - [ ] 카테고리 roots / children API 완성, depth 검증
 - [ ] Tag findOrCreate (대소문자 정규화, 30자 제한, 공백 trim)
 - [ ] Comment 작성 / 목록 / 삭제(soft)

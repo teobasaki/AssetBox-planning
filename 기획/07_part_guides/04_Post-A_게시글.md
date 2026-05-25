@@ -85,7 +85,7 @@ public interface PostService {
 - [ ] 기존 PostController, PostService 코드 정독
 - [ ] PostCreateRequest 의 JSON 부분과 multipart 파싱 흐름 확인 (`@RequestPart`)
 
-### M1 (5/26 ~ 6/3): MVP
+### M1 (5/27 ~ 6/3): MVP
 - [ ] `create()` 트랜잭션: User 검증 → Post 저장 → Tag findOrCreate → FileService 저장 → linkedRequestId 있으면 Request 자동 완료
 - [ ] `search()` 쿼리: criteria(`categoryId, tag, q, authorId, teamId, linkedRequestId, sort`) → Specification 또는 동적 JPQL
   - 정렬 화이트리스트: `createdAt`, `likeCount`, `viewCount` 만 허용
