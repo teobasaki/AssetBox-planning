@@ -101,14 +101,14 @@ Accept: application/json
 | 도메인 | 엔드포인트 수 | 에러 코드 종류 (대략) |
 |---|---|---|
 | User | 12 | 9 |
-| File | 5 + 업로드 컨트랙트 | 11 |
-| Post | 10 | 13 |
+| File | 3 + 업로드 컨트랙트 | 9 |
+| Post | 9 | 13 |
 | Request | 8 | 12 |
 | Comment | 6 | 8 |
 | Category | 5 | 5 |
 | Search/Tag | 1 (Post에 흡수) | 2 |
-| Message | 4 REST + 2 WS + 2 어드민 | 5 |
+| Message | 4 REST + 2 WS | 4 |
 | Feedback | 4 | 4 |
-| **합계** | **약 56개** | **69 (사전 기준)** |
+| **합계** | **약 47개** | **사전 기준** |
 
 > 본 명세서는 **MVP + SHOULD 기능까지** 포함합니다. WON'T(v1.1)는 본 문서에 등장하지 않으며, 백로그(`06_features/01_기능_카탈로그.md`)에서 추적됩니다.

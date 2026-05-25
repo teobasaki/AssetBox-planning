@@ -55,7 +55,7 @@ prometheus.yml
 | `ApiResponse<T>` | 모든 응답 표준 래퍼 — 모든 도메인이 사용 |
 | `BusinessException.notFound/badRequest/unauthorized/forbidden` | 모든 도메인이 사용 |
 | `BaseEntity` | 모든 엔티티가 상속 |
-| `@Async` 풀 (`AsyncConfig`) | DownloadLog 등 비동기 적재 |
+| `@Async` 풀 (`AsyncConfig`) | v1.1 비동기 작업 대비. MVP에서는 필수 사용처 없음 |
 | 환경변수: `JWT_SECRET, CORS_ALLOWED_ORIGINS, DB_URL, ...` | 도메인 코드에서 직접 시스템 환경변수 읽지 말 것 → application.yml 거치기 |
 
 ---
@@ -68,29 +68,28 @@ prometheus.yml
 
 ## 5. 단계별 작업 가이드
 
-### Day 1-2 (5/20-22)
+### M0 (5/22 ~ 5/25): 코드·문서 정독
 - [ ] 현재 `build.gradle` 의 `--add-opens` 블록 보존 확인 (Lombok + JDK 21 호환)
 - [ ] `application-dev.yml` (H2, create-drop) / `application-prod.yml` (MySQL, validate) 분리 확인
 - [ ] CI 워크플로우: PR 시 `./gradlew clean build` 통과 보장
 
-### Day 3-7: MVP 인프라
+### M1 (5/26 ~ 6/3): MVP 인프라
 - [ ] Docker Compose dev 환경 (백+프+H2 또는 MySQL 옵셔널)
 - [ ] CORS 화이트리스트 (`CORS_ALLOWED_ORIGINS`) 환경변수
 - [ ] GlobalExceptionHandler — 모든 예외 → ApiResponse 매핑
 - [ ] AdminBootstrapRunner — 시스템 유저(이메일 `system@assetbox.local`) 보장 (DM 협업)
-- [ ] AsyncConfig — `taskExecutor` 빈 (File-B 협업)
-
-### Day 8-9: 통합
-- [ ] 통합 테스트 데이 — Docker compose up 으로 한 사이클
+- [ ] AsyncConfig — v1.1 대비 기본 빈만 준비
+- [ ] 통합 테스트 데이(6/1) — Docker compose up 으로 한 사이클
 - [ ] 각 도메인 PR이 머지된 직후, build/CI 통과 모니터링
 
-### M2 (6/2-6/9)
+### M2 (6/4 ~ 6/11, 6/9 베타)
 - [ ] Prometheus + `/actuator/prometheus` 노출
 - [ ] 운영 프로파일 prod 검증 (MySQL 연결, ddl=validate)
 - [ ] **6/8 배포 리허설** 주관
 - [ ] **6/9 TA반 베타 배포** 주관
+- [ ] 6/10~6/11 베타 안정화 지원 (6/11 KMF 일정 고려)
 
-### M3 (6/10-6/16)
+### M3 (6/12 ~ 6/16)
 - [ ] 메트릭 대시보드 (Prometheus 쿼리 예시 문서화)
 - [ ] 로그 레벨 / 로테이션 점검
 - [ ] 6/15 회고 호스트 (PM과 공동)

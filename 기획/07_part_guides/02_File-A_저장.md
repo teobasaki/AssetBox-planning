@@ -22,13 +22,13 @@
 > 모르는 단어는 [`../00_overview/01_용어집.md`](../00_overview/01_용어집.md) 참고.
 > 비유: **택배 보관소.** 사람들이 맡긴 박스(파일)를 깔끔하게 분류해서 선반(디스크/S3)에 올린다. 받을 때 박스의 무게·내용물(확장자)을 검사하고, 손상되면 거절한다.
 
-> 짝꿍: **File-B (다운로드/로그)**. 같은 `file/` 패키지를 공유하지만, A는 "저장·연결", B는 "전달·기록". 매일 5분 데일리 페어 동기화 권장.
+> 짝꿍: 같은 File 통합 도메인의 페어. A/B 이름은 내부 분담용일 뿐, MVP 컨트랙트는 하나다.
 
 ---
 
 ## 1. 책임 한 줄
 
-파일 업로드, 확장자/사이즈 검증, 저장 추상화(`FileStorageService`), `AssetFile` 엔티티 라이프사이클 (저장/삭제/연결).
+파일 업로드 위임 처리, 확장자/사이즈 검증, 저장 추상화(`FileStorageService`), 파일 조회/메타/삭제까지 포함한 통합 File 라이프사이클.
 
 ---
 
@@ -38,9 +38,9 @@
 ```
 com.assetbox.file/
 ├─ service/
-│   ├─ FileStorageService.java        (인터페이스 — 짝꿍과 공동)
-│   ├─ LocalFileStorageService.java   ★ 내 책임
-│   └─ FileService.java               ★ 내 책임 (saveAndAttach, deleteByPost)
+│   ├─ FileStorageService.java        (인터페이스 — 페어 공동)
+│   ├─ LocalFileStorageService.java
+│   └─ FileService.java               (save/load/meta/delete)
 ├─ repository/
 │   └─ AssetFileRepository.java
 └─ domain/
@@ -51,8 +51,8 @@ com.assetbox.file/
 - `FileStorageService.java` 인터페이스 → A가 저장 메서드, B가 로딩 메서드를 함께 정의
 
 ### 절대 손대지 말 것
-- File-B의 `DownloadService.java`, `DownloadLog.java`, `DownloadLogController.java`
 - `Post` / `Request` / 다른 도메인 패키지
+- v1.1 참고용 `DownloadLog` 계열을 MVP 범위로 되살리지 말 것
 
 ---
 
@@ -60,26 +60,17 @@ com.assetbox.file/
 
 ```java
 public interface FileService {
-    /**
-     * Post 작성/수정 시 호출. 파일들을 디스크/S3에 저장하고 AssetFile 엔티티 생성.
-     * @param postId       대상 Post id (이미 저장된 상태)
-     * @param files        업로드된 MultipartFile 목록
-     * @param thumbnail    썸네일 한 장 (없으면 null)
-     * @return 생성된 AssetFile 목록
-     * @throws BusinessException 확장자/사이즈 위반 시 (400)
-     */
-    List<AssetFile> saveAndAttach(Long postId, List<MultipartFile> files, MultipartFile thumbnail);
-
-    /** 게시글 삭제 시 모든 파일 삭제 (디스크 + DB). hard. */
-    void deleteByPost(Long postId);
-
-    /** 게시글에 붙은 모든 파일 (썸네일 포함). DTO 매핑은 호출자 책임. */
-    List<AssetFile> findByPost(Long postId);
+    StoredFile save(FilePurpose purpose, Long ownerId, Long uploadedBy, MultipartFile file);
+    List<StoredFile> saveAll(FilePurpose purpose, Long ownerId, Long uploadedBy, List<MultipartFile> files);
+    FileResource load(Long fileId, Long requesterId);
+    FileResponse meta(Long fileId, Long requesterId);
+    void delete(Long fileId, Long requesterId);
 }
 ```
 
 ### 컨트랙트 보장
-- 확장자 화이트리스트: `fbx, blend, obj, glb, gltf, zip, png, jpg, jpeg`
+- purpose: `ASSET / POST_THUMBNAIL / USER_AVATAR / REQUEST_REFERENCE`
+- 확장자 화이트리스트: 에셋 `fbx, blend, obj, glb, gltf, zip`, 이미지 `png, jpg, jpeg`
 - 합계 사이즈 ≤ 20MB
 - 썸네일은 `png/jpg/jpeg` 만, 별도 합계 외 1MB
 - 저장 실패 시 이미 디스크에 쓴 파일은 cleanup (`@Transactional` + try-catch + 파일 삭제)
@@ -95,25 +86,24 @@ public interface FileService {
 
 ## 5. 단계별 작업 가이드
 
-### Day 1-2
+### M0 (5/22 ~ 5/25): 코드·문서 정독
 - [ ] 기존 `file/` 패키지 정독, 인터페이스가 잘 분리되었는지 확인
-- [ ] 짝꿍(File-B)와 30분 미팅 — `FileStorageService` 인터페이스 합의
+- [ ] 페어와 30분 미팅 — `FileService` / `FileStorageService` 인터페이스 합의
 
-### Day 3-5: MVP
-- [ ] `FileService.saveAndAttach` 트랜잭션 + 보상 로직 (디스크 cleanup) 견고화
+### M1 (5/26 ~ 6/3): MVP
+- [ ] `FileService.save/saveAll` 트랜잭션 + 보상 로직 (디스크 cleanup) 견고화
 - [ ] 확장자 검증 상수 `FileExtensionPolicy` 추출, 변경 한 곳에서
-- [ ] AssetFile 응답 DTO `AssetFileResponse{id, originalName, extension, sizeBytes, thumbnail, downloadUrl}` 통일
-
-### Day 6-9: 통합
-- [ ] Post-A와 페어 작업: `POST /api/posts` 의 multipart 파싱 + saveAndAttach 호출 흐름
+- [ ] 파일 조회 `GET /api/files/{fileId}`, 메타 `GET /api/files/{fileId}/meta` 구현
+- [ ] File 응답 DTO `FileResponse{id, originalName, extension, sizeBytes, purpose, ownerId}` 통일
+- [ ] Post-A와 페어 작업: `POST /api/posts` 의 multipart 파싱 + FileService 호출 흐름
 - [ ] 게시글 수정 시 파일 부분 교체 정책 합의 (전체 재업로드 vs 추가/삭제 별도 API) — 본 MVP는 **전체 재업로드** 로 시작 (간단)
-- [ ] 통합 테스트 데이(5/30) 참여
+- [ ] 통합 테스트 데이(6/1) 참여
 
-### M2
-- [ ] 게시글 삭제 시 cascading 정리, 디스크에서도 제거
+### M2 (6/4 ~ 6/11)
+- [ ] 파일 soft delete/비활성화 정책 점검
 - [ ] 저장 백엔드 인터페이스 점검 (S3 전환 v1.1 준비) — `FileStorageService` 만 구현체 바꾸면 되는 설계 유지
 
-### M3
+### M3 (6/12 ~ 6/16)
 - [ ] 업로드 실패 케이스 정리 (네트워크 중단, 디스크 가득 참 등)
 - [ ] 로그/메트릭: 업로드 횟수/평균 사이즈 (Infra 협업)
 
@@ -132,8 +122,10 @@ public interface FileService {
 - [ ] thumbnail=true 는 게시글당 최대 1개
 - [ ] 기존 썸네일이 있으면 교체 (디스크에서도 삭제)
 
-### F-04 게시글 삭제 시
-- [ ] 모든 AssetFile DB 삭제 + 디스크 파일 삭제 (best-effort, 실패 시 로깅)
+### F-04 파일 삭제/비활성화
+- [ ] 소유자/관리자만 삭제 가능
+- [ ] 사용 중인 파일 단독 삭제는 409 `FILE_IN_USE`
+- [ ] soft delete 후 조회 시 410 `FILE_DELETED`
 
 ---
 
@@ -142,7 +134,7 @@ public interface FileService {
 | 함정 | 결과 | 회피 |
 |---|---|---|
 | 저장 실패 시 cleanup 누락 | 디스크에 쓰레기 누적 | try-finally 로 보장. 통합 테스트에서 의도적 실패 케이스 검증 |
-| Post에서 AssetFile 직접 생성 | 책임 경계 깨짐 | "FileService.saveAndAttach 만 사용" 룰. Post-A와 매주 확인 |
+| Post에서 AssetFile 직접 생성 | 책임 경계 깨짐 | "FileService.save/saveAll 만 사용" 룰. Post-A와 매주 확인 |
 | 저장 경로를 절대경로로 박음 | 운영 환경 깨짐 | 항상 상대 경로 + Storage 인터페이스가 base 결합 |
 | `MultipartFile.getOriginalFilename()` 그대로 저장 | 경로 트래버설 위험 | UUID 또는 hash 기반으로 storedName 생성, originalName은 메타로만 |
-| File-B와 같은 인터페이스를 동시에 수정 | 머지 충돌 | 인터페이스 변경은 양측 합의 후 한 PR에 같이 |
+| v1.1용 DownloadLog를 MVP에 끼워 넣음 | API/ERD 범위 폭증 | 다운로드 로그·통계는 v1.1로 분리 |

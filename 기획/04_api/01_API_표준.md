@@ -134,15 +134,10 @@ JWT 발급은 `POST /api/users/login`. payload 예시:
 ### 4-2) 익명 허용 엔드포인트
 
 - `POST /api/users/signup`, `POST /api/users/login`
-- `GET /api/categories/**`
-- `GET /api/posts` 목록 + `GET /api/posts/{id}` 상세
-- `GET /api/posts/{postId}/files/{fileId}` 다운로드
-- `GET /api/posts/popular-tags`
-- `POST /api/feedback`
-- `GET /api/users/{id}/avatar`
+- `GET /api/oauth2/authorization/google`, `GET /api/oauth2/authorization/naver`
 - `/h2-console/**`, `/swagger-ui/**`, `/v3/api-docs/**`, `/actuator/health`
 
-그 외 전부 인증 필요.
+그 외 전부 인증 필요. 일반 에셋 게시글, 카테고리, 파일 조회/다운로드, 피드백 작성은 모두 내부 회원만 가능하다.
 
 ### 4-3) 권한 매트릭스
 
@@ -150,8 +145,8 @@ JWT 발급은 `POST /api/users/login`. payload 예시:
 |---|---|
 | (익명) | 위 익명 허용 엔드포인트만 |
 | USER | 인증 필요 모든 일반 엔드포인트. `/api/admin/**` 불가 |
-| ADMIN | USER 권한 + `/api/admin/**` |
-| SUPER_ADMIN | ADMIN 권한 + 유저 role 변경, 위험 작업 |
+| ADMIN | USER 권한 + `/api/admin/**` 조회/모니터링 |
+| SUPER_ADMIN | ADMIN 권한 + 유저 role 변경 |
 
 위계: `SUPER_ADMIN > ADMIN > USER` (SecurityConfig RoleHierarchy).
 
@@ -201,12 +196,14 @@ Authorization: Bearer <JWT>
 ## 7) DTO / URL 네이밍
 
 - 자원 명사 복수형: `/api/posts`, `/api/users`
-- 동사 금지. 단 상태 전이는 PATCH 서브리소스 허용:
-  - `PATCH /api/requests/{id}/status`
+- 동사 금지. 단 명확한 액션성 서브리소스는 PATCH 허용:
   - `PATCH /api/requests/{id}/assign`
-  - `PATCH /api/requests/{id}/link-post`
+  - `PATCH /api/requests/{id}/reject`
+  - `PATCH /api/requests/{id}/reopen`
 - 중첩은 한 단계: `/api/posts/{id}/comments` OK
 - 검색 한 입구: `GET /api/posts?q&tag&categoryId&authorId&sort` (별도 `/search` X)
+
+> 요청 완료는 별도 `link-post` 엔드포인트를 만들지 않는다. `POST /api/posts` 의 `linkedRequestId` 로 자동 완료한다.
 
 ---
 

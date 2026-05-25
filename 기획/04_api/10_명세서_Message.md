@@ -1,7 +1,7 @@
 # 10. API 명세서 — Message (DM)
 
 > 담당 파트: **DM**
-> 베이스 경로: `/api/messages/**`, `/api/admin/messages/**`
+> 베이스 경로: `/api/messages/**`
 > WebSocket: `/ws` 엔드포인트 + STOMP 토픽
 
 | # | Method | Path | Auth | 요약 |
@@ -12,10 +12,9 @@
 | M-4 | GET | `/api/messages/unread` | USER | 안 읽은 수 |
 | M-5 | (WS) | `/user/queue/messages` | USER | 수신 푸시 (구독만) |
 | M-6 | (WS) | `/user/queue/messages.unread` | USER | 안 읽은 수 변동 푸시 |
-| M-7 | GET | `/api/admin/messages/conversations` | ADMIN | 전체 대화 쌍 |
-| M-8 | GET | `/api/admin/messages/conversation` | ADMIN | 두 유저 간 대화 열람 |
 
 > M2부터 WebSocket 도입. M1까지는 REST 폴링으로 충분.
+> 어드민의 DM 강제 열람(`/api/admin/messages/**`)은 분쟁 처리가 우리 책임 영역이 아니므로 본 프로젝트에서 제외한다.
 
 ---
 
@@ -34,14 +33,14 @@ Authorization: Bearer <jwt>
 
 ```json
 {
-  "receiverId": 18,
+  "toUserId": 18,
   "content": "의자 요청 받아서 작업 시작합니다."
 }
 ```
 
 | 필드 | 타입 | 제약 |
 |---|---|---|
-| receiverId | long | NotNull, 자기 자신 불가 |
+| toUserId | long | NotNull, 자기 자신 불가 |
 | content | string | NotBlank, max 2000자 |
 
 ### 응답 201
@@ -73,11 +72,11 @@ Authorization: Bearer <jwt>
 
 | HTTP | code | 발생 조건 |
 |---|---|---|
-| 400 | `VALIDATION_FAILED` | receiverId 누락 / content 누락 |
-| 400 | `MESSAGE_SELF_NOT_ALLOWED` | receiverId == 본인 |
+| 400 | `VALIDATION_FAILED` | toUserId 누락 / content 누락 |
+| 400 | `MESSAGE_SELF_NOT_ALLOWED` | toUserId == 본인 |
 | 400 | `MESSAGE_CONTENT_TOO_LONG` | 2000자 초과 |
 | 401 | `UNAUTHORIZED` | |
-| 404 | `USER_NOT_FOUND` | receiverId 미존재 |
+| 404 | `USER_NOT_FOUND` | toUserId 미존재 |
 | 403 | `MESSAGE_RECEIVER_BLOCKED` | (v1.1) 차단 관계 |
 
 ---
@@ -284,103 +283,6 @@ SUBSCRIBE
 
 수신자가 페이지를 켜둔 상태에서 자동으로 헤더 뱃지가 갱신되도록.
 
----
-
-## M-7. GET `/api/admin/messages/conversations`
-
-**설명**: 어드민이 모든 대화 쌍을 살펴봄. 분쟁 조사 시작점.
-**인증**: ADMIN
-
-### 요청
-
-```http
-GET /api/admin/messages/conversations?page=0&size=20&userId=12
-```
-
-| Query | 타입 | 비고 |
-|---|---|---|
-| page, size | int | 표준 |
-| userId | long? | 특정 사용자가 포함된 대화만 |
-
-### 응답 200
-
-```json
-{
-  "success": true,
-  "data": {
-    "items": [
-      {
-        "userAId": 12,
-        "userANickname": "김TA",
-        "userBId": 18,
-        "userBNickname": "박TA",
-        "lastMessage": "의자 요청 받아서 작업 시작합니다.",
-        "lastMessageAt": "2026-05-23T11:00:00",
-        "messageCount": 43
-      }
-    ],
-    "page": 0, "size": 20, "totalElements": 17, "totalPages": 1,
-    "first": true, "last": true
-  }
-}
-```
-
-### 에러
-
-| HTTP | code | 발생 조건 |
-|---|---|---|
-| 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | USER 호출 |
-| 400 | `PAGINATION_SIZE_TOO_LARGE` | |
-
----
-
-## M-8. GET `/api/admin/messages/conversation`
-
-**설명**: 두 유저 간의 메시지 전체 (어드민 열람). 분쟁 / 부적절 콘텐츠 확인용.
-**인증**: ADMIN
-
-### 요청
-
-```http
-GET /api/admin/messages/conversation?userA=12&userB=18&page=0&size=50
-```
-
-| Query | 타입 | 비고 |
-|---|---|---|
-| userA | long | 한 쌍의 첫 유저 |
-| userB | long | 다른 유저 |
-| page, size | int | |
-
-### 응답 200
-
-```json
-{
-  "success": true,
-  "data": {
-    "items": [ /* MessageResponse[] */ ],
-    "page": 0, "size": 50, "totalElements": 43, "totalPages": 1,
-    "first": true, "last": true
-  }
-}
-```
-
-### 부수효과
-
-- **read 상태를 변경하지 않음.** 어드민 열람은 unread 처리에 영향 없음.
-
-### 에러
-
-| HTTP | code | 발생 조건 |
-|---|---|---|
-| 400 | `VALIDATION_FAILED` | userA / userB 누락 |
-| 400 | `MESSAGE_SAME_PAIR` | userA == userB |
-| 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | USER 호출 |
-| 404 | `USER_NOT_FOUND` | userA 또는 userB 미존재 |
-
----
-
 ## 부록 — 시스템 발신자
 
 요청 게시판의 상태 변경 알림(`Request → DM`)은 **시스템 유저**가 발신합니다.
@@ -388,8 +290,9 @@ GET /api/admin/messages/conversation?userA=12&userB=18&page=0&size=50
 - 시스템 유저는 `AdminBootstrapRunner` 가 부팅 시 보장 (`email=system@assetbox.local`, role=ADMIN, nickname="SYSTEM")
 - `UserService.getSystemUserId()` 가 그 id 반환
 - 시스템 메시지의 content 는 다음 패턴 권장:
-  - `[요청 #{id}] {assigneeNickname}에게 배정되었습니다.`
-  - `[요청 #{id}] 상태가 {status} 로 변경되었습니다.`
+  - `[요청 #{id}] {assigneeNickname}님이 요청을 수락했습니다.`
+  - `[요청 #{id}] 요청이 반려되었습니다.`
+  - `[요청 #{id}] 요청이 다시 열렸습니다.`
   - `[요청 #{id}] 완료되었습니다 → /posts/{linkedPostId}`
 
 수신자(요청자)는 다른 일반 메시지와 동일하게 인박스에서 봄.

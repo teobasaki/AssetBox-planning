@@ -6,8 +6,8 @@
 
 | # | Method | Path | Auth | 요약 |
 |---|---|---|---|---|
-| K-1 | GET | `/api/categories/roots` | 익명 | 대분류 (depth=1) |
-| K-2 | GET | `/api/categories/{parentId}/children` | 익명 | 특정 카테고리의 하위 |
+| K-1 | GET | `/api/categories/roots` | USER | 대분류 (depth=1) |
+| K-2 | GET | `/api/categories/{parentId}/children` | USER | 특정 카테고리의 하위 |
 | K-3 | POST | `/api/categories` | ADMIN | 카테고리 생성 |
 | K-4 | PATCH | `/api/categories/{id}` | ADMIN | 이름 / 정렬 수정 |
 | K-5 | DELETE | `/api/categories/{id}` | ADMIN | 카테고리 삭제 |
@@ -17,12 +17,13 @@
 ## K-1. GET `/api/categories/roots`
 
 **설명**: 대분류 목록. depth=1, `sortOrder` 오름차순.
-**인증**: 익명
+**인증**: USER
 
 ### 요청
 
 ```http
 GET /api/categories/roots
+Authorization: Bearer <jwt>
 ```
 
 ### 응답 200
@@ -41,19 +42,24 @@ GET /api/categories/roots
 
 ### 에러
 
-거의 없음. 시드 데이터가 없으면 빈 배열.
+| HTTP | code | 발생 조건 |
+|---|---|---|
+| 401 | `UNAUTHORIZED` | 토큰 없음 |
+
+시드 데이터가 없으면 빈 배열.
 
 ---
 
 ## K-2. GET `/api/categories/{parentId}/children`
 
 **설명**: 특정 카테고리의 직속 자식. depth+1 만, 손자는 미포함.
-**인증**: 익명
+**인증**: USER
 
 ### 요청
 
 ```http
 GET /api/categories/3/children   # "소품" 의 중분류 조회
+Authorization: Bearer <jwt>
 ```
 
 ### 응답 200
@@ -73,6 +79,7 @@ GET /api/categories/3/children   # "소품" 의 중분류 조회
 
 | HTTP | code | 발생 조건 |
 |---|---|---|
+| 401 | `UNAUTHORIZED` | 토큰 없음 |
 | 404 | `CATEGORY_NOT_FOUND` | parentId 미존재 |
 
 ---

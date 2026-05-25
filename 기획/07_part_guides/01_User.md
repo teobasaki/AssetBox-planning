@@ -90,32 +90,27 @@ public interface UserService {
 
 ## 5. 단계별 작업 가이드
 
-### Day 1 (5/20 ~ 5/22)
-- [ ] 기존 코드 정독: `user/` 패키지 + `common.security/*`
-- [ ] 본 문서의 컨트랙트가 실제 코드와 일치하는지 검증, 안 맞으면 PM에 보고
-- [ ] 첫 PR: User 도메인 README + 컨트랙트 주석 추가 (코드 변경 없이도 OK)
+### M0 (5/22 ~ 5/25): 코드·문서 정독
+- [ ] 본 문서와 `04_api/03_명세서_User.md` / `04_api/02_...수정본.md` 대조
+- [ ] Form + OAuth2(Google/Naver) 구현 순서, 이메일 화이트리스트, `realName/major` 정책 확인
 
-### Day 2-4 (5/23 ~ 5/26): MVP 굳히기
-- [ ] 회원가입: 이메일 중복 시 409 + `USER_EMAIL_DUPLICATED`
-- [ ] 로그인: BCrypt 비교 → JWT 발급, 실패 시 401 + `LOGIN_FAILED` (이메일 존재 여부는 노출 X)
-- [ ] `/me` GET/PUT, `UserResponse` 매핑 표준화 (avatarUrl 빌드: `/api/users/{id}/avatar` 또는 S3 URL)
-- [ ] 단위 테스트 2개: 회원가입 정상/중복, 로그인 정상/실패
-
-### Day 5-7 (5/27 ~ 5/29): 통합 준비
+### M1 (5/26 ~ 6/3): MVP
+- [ ] 회원가입: 이메일 화이트리스트, 중복 시 409 + `USER_EMAIL_DUPLICATED`
+- [ ] 로그인: BCrypt 비교 → JWT 발급, 실패 시 401 + `LOGIN_FAILED` (이메일 존재 여부는 노출 X), `profileRequired` 포함
+- [ ] `/me` GET/PUT, `UserResponse` 매핑 표준화 (avatarUrl 빌드: `/api/users/{id}/avatar` 또는 File URL)
+- [ ] Google OAuth 우선 연결, Naver는 여력 있으면 후속
 - [ ] `UserService.requireExists` 가 모든 도메인에서 호출 가능한지 확인 — 다른 도메인 페어와 1회 미팅 (10분)
 - [ ] `getSystemUserId()` — DM 알림용 시스템 발신자 ID. AdminBootstrapRunner와 함께 보장 (Infra 협업)
 - [ ] 권한 변경: SUPER_ADMIN 만 가능 + 자기 자신은 강등 불가
 - [ ] AvatarUpload: 확장자/사이즈 검증, 저장은 FileStorageService 호출 (File-A 협업)
+- [ ] 통합 테스트 데이(6/1) 참석 — 다른 도메인 흐름에서 User 호출이 깨지지 않는지 확인
+- [ ] M1 락 (6/3 EOD) 전까지 P0 픽스
 
-### Day 8-10 (5/30 ~ 6/1): MVP 통합 테스트
-- [ ] 통합 테스트 데이(5/30) 참석 — 다른 도메인 흐름에서 User 호출이 깨지지 않는지 확인
-- [ ] M1 락 (6/1) 전까지 P0 픽스
-
-### M2 (6/2 ~ 6/9): SHOULD 기능
+### M2 (6/4 ~ 6/11, 6/9 베타): SHOULD 기능
 - [ ] 디렉토리 / 검색 (`/users/directory`, `/users/search`) — DM 상대 검색용
-- [ ] 어드민 유저 관리 API + 권한 변경 정책
+- [ ] 어드민 유저 목록 조회 + SUPER_ADMIN 권한 변경 정책
 
-### M3 (6/10 ~ 6/16): 안정화
+### M3 (6/12 ~ 6/16): 안정화
 - [ ] 토큰 만료 / 갱신 UX 다듬기 (만료된 토큰 401 + 명시적 코드 `TOKEN_EXPIRED`)
 - [ ] 로깅: 로그인 실패 누적 모니터링 메트릭(Infra 협업)
 
@@ -130,13 +125,15 @@ public interface UserService {
 - [ ] 중복 이메일 409 `USER_EMAIL_DUPLICATED`
 
 ### U-02 로그인
-- [ ] 응답 `{ token, user: UserResponse }`
+- [ ] 응답 `{ accessToken, tokenType, profileRequired }`
 - [ ] 잘못된 비번/없는 이메일 모두 동일한 401 `LOGIN_FAILED` (계정 존재 노출 X)
 - [ ] 토큰에 userId, role 포함
 
 ### U-03 /me
 - [ ] 비인증 401
-- [ ] PUT 시 nickname/bio 만 수정 (role/email 변경 불가)
+- [ ] PUT 시 nickname/bio 수정 가능
+- [ ] OAuth 첫 가입으로 `major == null` 인 경우만 major 최초 보완 허용
+- [ ] 이미 설정된 realName/major, role/email 변경 불가
 
 ### U-06 권한 변경
 - [ ] 본인의 role 변경 시 403 `FORBIDDEN_SELF_ROLE_CHANGE`

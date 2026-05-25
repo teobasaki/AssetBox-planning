@@ -65,7 +65,7 @@ q=chair AND tag=low-poly AND categoryId=12
 ### S-1. GET `/api/posts/popular-tags`
 
 **설명**: 사용 빈도 상위 태그. Caffeine 캐시 60초.
-**인증**: 익명
+**인증**: USER
 
 `05_명세서_Post.md` 의 **P-3** 와 동일. 본 문서에서는 검색 시나리오 관점에서 한 번 더 참조합니다.
 

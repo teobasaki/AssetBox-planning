@@ -8,7 +8,7 @@
 
 | # | Method | Path | Auth | 요약 |
 |---|---|---|---|---|
-| C-1 | GET | `/api/posts/{postId}/comments` | 익명 | Post 댓글 목록 (트리) |
+| C-1 | GET | `/api/posts/{postId}/comments` | USER | Post 댓글 목록 (트리) |
 | C-2 | POST | `/api/posts/{postId}/comments` | USER | Post 댓글 작성 (대댓글 포함) |
 | C-3 | DELETE | `/api/posts/{postId}/comments/{commentId}` | USER (작성자) | Post 댓글 삭제 (soft) |
 | C-4 | GET | `/api/requests/{requestId}/comments` | USER | Request 댓글 목록 |
@@ -28,12 +28,13 @@
 ## C-1. GET `/api/posts/{postId}/comments`
 
 **설명**: 게시글의 댓글 트리. 루트 댓글 + 각 루트의 답글들. 시간 ASC.
-**인증**: 익명
+**인증**: USER
 
 ### 요청
 
 ```http
 GET /api/posts/42/comments?page=0&size=20
+Authorization: Bearer <jwt>
 ```
 
 | Query | 타입 | 기본 | 비고 |
@@ -89,6 +90,7 @@ GET /api/posts/42/comments?page=0&size=20
 
 | HTTP | code | 발생 조건 |
 |---|---|---|
+| 401 | `UNAUTHORIZED` | |
 | 404 | `POST_NOT_FOUND` | postId 미존재 |
 | 400 | `PAGINATION_SIZE_TOO_LARGE` | |
 
@@ -154,7 +156,7 @@ Authorization: Bearer <jwt>
 ## C-3. DELETE `/api/posts/{postId}/comments/{commentId}`
 
 **설명**: 댓글 삭제. soft. 작성자 본인만.
-**인증**: USER (작성자) — ADMIN은 별도 어드민 엔드포인트 (v1.1)
+**인증**: USER (작성자)
 
 ### 요청
 

@@ -9,15 +9,14 @@
 | # | Method | Path | Auth | 요약 |
 |---|---|---|---|---|
 | P-1 | POST | `/api/posts` | USER | 게시글 작성 (multipart) |
-| P-2 | GET | `/api/posts` | 익명 | 게시글 목록 / 검색 |
-| P-3 | GET | `/api/posts/popular-tags` | 익명 | 인기 태그 |
+| P-2 | GET | `/api/posts` | USER | 게시글 목록 / 검색 |
+| P-3 | GET | `/api/posts/popular-tags` | USER | 인기 태그 |
 | P-4 | GET | `/api/posts/liked` | USER | 내가 좋아요 누른 글 |
-| P-5 | GET | `/api/posts/{postId}` | 익명 | 게시글 상세 (view +1) |
+| P-5 | GET | `/api/posts/{postId}` | USER | 게시글 상세 (view +1) |
 | P-6 | PUT | `/api/posts/{postId}` | USER (작성자) | 게시글 수정 |
 | P-7 | DELETE | `/api/posts/{postId}` | USER (작성자) | 게시글 삭제 (soft) |
 | P-8 | POST | `/api/posts/{postId}/like` | USER | 좋아요 토글 |
-| P-9 | GET | `/api/admin/posts` | ADMIN | 어드민 게시글 목록 |
-| P-10 | DELETE | `/api/admin/posts/{id}` | ADMIN | 어드민 강제 삭제 (hard) |
+| P-9 | GET | `/api/admin/posts` | ADMIN | 어드민 게시글 목록 (조회만) |
 
 ---
 
@@ -43,7 +42,8 @@ Content-Type: application/json
   "title": "캐주얼 의자 (low poly)",
   "content": "Blender 4.0 / 트라이앵글 1.2k\n자유롭게 사용 가능합니다.",
   "categoryId": 12,
-  "tags": ["furniture", "low-poly", "chair"]
+  "tags": ["furniture", "low-poly", "chair"],
+  "linkedRequestId": 11
 }
 --boundary
 Content-Disposition: form-data; name="files"; filename="chair-low-poly.fbx"
@@ -64,6 +64,7 @@ Content-Type: image/png
 | data | content | string | NotBlank |
 | data | categoryId | long? | null이면 미지정 |
 | data | tags | string[] | 0~10개, 각 30자 |
+| data | linkedRequestId | long? | 요청 결과물일 때만. assignee 본인 검증 후 요청 자동 COMPLETED |
 | files | binary | - | 1개 이상 권장 |
 | thumbnail | image/png \| jpeg | - | 0 또는 1개, ≤ 1MB |
 
@@ -101,6 +102,7 @@ Content-Type: image/png
     "likeCount": 0,
     "downloadCount": 0,
     "liked": false,
+    "linkedRequestId": 11,
     "createdAt": "2026-05-21T14:30:15"
   }
 }
@@ -118,14 +120,22 @@ Content-Type: image/png
 | 400 | `TAGS_TOO_MANY` | 11개 이상 |
 | 401 | `UNAUTHORIZED` | |
 | 404 | `CATEGORY_NOT_FOUND` | categoryId 미존재 |
+| 403 | `POST_LINKED_REQUEST_FORBIDDEN` | linkedRequestId 요청의 assignee가 아님 |
+| 400 | `POST_LINKED_REQUEST_INVALID_STATUS` | linkedRequestId 요청이 IN_PROGRESS가 아님 |
+| 404 | `REQUEST_NOT_FOUND` | linkedRequestId 미존재 |
 | 500 | `STORAGE_WRITE_FAILED` | 디스크 저장 실패 (트랜잭션 롤백 + cleanup) |
+
+### 부수효과
+
+- `linkedRequestId`가 있으면 같은 트랜잭션에서 Request 도메인이 `linkedPostId`를 세팅하고 status를 `COMPLETED`로 바꾼다.
+- 요청자에게 시스템 DM을 발송한다.
 
 ---
 
 ## P-2. GET `/api/posts`
 
 **설명**: 게시글 목록 + 검색의 단일 입구. 카테고리/태그/키워드/작성자/팀 필터 + 정렬.
-**인증**: 익명
+**인증**: USER
 
 ### 요청
 
@@ -143,7 +153,7 @@ GET /api/posts?page=0&size=20&sort=likeCount,desc&q=chair&tag=low-poly&categoryI
 | categoryId | long? | - | 정확 매치 (자식 미포함, v1.1) |
 | authorId | long? | - | |
 | teamId | long? | - | |
-| includeDeleted | bool | false | 어드민만 true 허용 (USER가 true로 보내면 무시) |
+| linkedRequestId | long? | - | 특정 요청의 결과 게시글 필터 |
 
 ### 응답 200
 
@@ -159,12 +169,13 @@ GET /api/posts?page=0&size=20&sort=likeCount,desc&q=chair&tag=low-poly&categoryI
         "authorId": 12,
         "categoryId": 12,
         "tags": ["furniture", "low-poly", "chair"],
-        "thumbnailUrl": "/api/posts/42/files/138",
+        "thumbnailUrl": "/api/files/138",
         "fileExtension": "fbx",
         "viewCount": 173,
         "likeCount": 24,
         "commentCount": 5,
-        "downloadCount": 89,
+        "downloadCount": null,
+        "linkedRequestId": 11,
         "createdAt": "2026-05-21T14:30:15"
       }
     ],
@@ -180,6 +191,7 @@ GET /api/posts?page=0&size=20&sort=likeCount,desc&q=chair&tag=low-poly&categoryI
 |---|---|---|
 | 400 | `PAGINATION_SIZE_TOO_LARGE` | size > 50 |
 | 400 | `SORT_KEY_NOT_ALLOWED` | sort 키 위반 |
+| 401 | `UNAUTHORIZED` | |
 | 404 | `CATEGORY_NOT_FOUND` | categoryId 미존재 |
 
 ---
@@ -187,7 +199,7 @@ GET /api/posts?page=0&size=20&sort=likeCount,desc&q=chair&tag=low-poly&categoryI
 ## P-3. GET `/api/posts/popular-tags`
 
 **설명**: 사용 빈도 기준 상위 태그. Caffeine 캐시 60초.
-**인증**: 익명
+**인증**: USER
 
 ### 요청
 
@@ -217,6 +229,7 @@ GET /api/posts/popular-tags?limit=10
 | HTTP | code | 발생 조건 |
 |---|---|---|
 | 400 | `LIMIT_TOO_LARGE` | limit > 50 |
+| 401 | `UNAUTHORIZED` | |
 
 ---
 
@@ -247,13 +260,13 @@ Authorization: Bearer <jwt>
 ## P-5. GET `/api/posts/{postId}`
 
 **설명**: 게시글 상세. 조회수 +1 (별도 트랜잭션).
-**인증**: 익명 (로그인 시 `liked` 필드가 의미 있음)
+**인증**: USER
 
 ### 요청
 
 ```http
 GET /api/posts/42
-Authorization: Bearer <jwt>   # 선택. 있으면 liked 정확
+Authorization: Bearer <jwt>
 ```
 
 ### 응답 200
@@ -264,14 +277,15 @@ Authorization: Bearer <jwt>   # 선택. 있으면 liked 정확
 
 | HTTP | code | 발생 조건 |
 |---|---|---|
+| 401 | `UNAUTHORIZED` | |
 | 404 | `POST_NOT_FOUND` | |
-| 410 | `POST_DELETED` | 작성자 soft delete (어드민이 보려면 `/api/admin/posts/{id}` 사용) |
+| 410 | `POST_DELETED` | 작성자 soft delete |
 
 ---
 
 ## P-6. PUT `/api/posts/{postId}`
 
-**설명**: 게시글 수정. 본문 + 카테고리 + 태그. 파일은 별도 정책 (현 MVP: 전체 재업로드만 가능 → 새 게시글로 권장).
+**설명**: 게시글 수정. 본문 + 카테고리 + 태그. `linkedRequestId`는 작성 시 1회만 가능하며 수정 불가.
 **인증**: USER (작성자 본인만)
 
 ### 요청
@@ -311,6 +325,7 @@ Authorization: Bearer <jwt>
 | 403 | `FORBIDDEN` | 작성자 아님 |
 | 404 | `POST_NOT_FOUND` | |
 | 404 | `CATEGORY_NOT_FOUND` | |
+| 409 | `POST_LINKED_REQUEST_IMMUTABLE` | linkedRequestId 변경 시도 |
 
 ---
 
@@ -377,7 +392,7 @@ Authorization: Bearer <jwt>
 
 ## P-9. GET `/api/admin/posts`
 
-**설명**: 어드민용 게시글 목록. soft delete된 글도 포함 가능.
+**설명**: 어드민용 게시글 목록. soft delete된 글도 포함 가능. 조회/모니터링 전용.
 **인증**: ADMIN
 
 ### 요청
@@ -402,34 +417,7 @@ P-2 응답 + 각 항목에 `deleted` (bool) 필드 추가.
 | 401 | `UNAUTHORIZED` | |
 | 403 | `FORBIDDEN` | |
 
----
-
-## P-10. DELETE `/api/admin/posts/{id}`
-
-**설명**: 어드민 강제 삭제. **hard delete** (DB row + 디스크 파일 모두 삭제). 분쟁 / 부적절 콘텐츠 대응.
-**인증**: ADMIN
-
-### 요청
-
-```http
-DELETE /api/admin/posts/42
-Authorization: Bearer <admin-jwt>
-```
-
-### 응답 200
-
-```json
-{ "success": true, "data": null }
-```
-
-### 에러
-
-| HTTP | code | 발생 조건 |
-|---|---|---|
-| 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | USER 호출 |
-| 404 | `POST_NOT_FOUND` | |
-| 500 | `STORAGE_DELETE_FAILED` | 디스크 삭제 실패 (DB는 성공해도 best-effort) |
+> 게시글 강제 삭제(hard delete), 복구, 분쟁 처리 API는 본 프로젝트 범위 밖이다. 작성자 본인의 soft delete만 지원한다.
 
 ---
 
@@ -442,7 +430,8 @@ Authorization: Bearer <admin-jwt>
   id: long, title: string, authorNickname: string, authorId: long,
   categoryId: long | null, tags: string[],
   thumbnailUrl: string | null, fileExtension: string | null,
-  viewCount: long, likeCount: long, commentCount: long, downloadCount: long,
+  viewCount: long, likeCount: long, commentCount: long, downloadCount: long | null,
+  linkedRequestId: long | null,
   createdAt: ISODateTime
 }
 ```
@@ -455,6 +444,7 @@ Authorization: Bearer <admin-jwt>
   categoryId, categoryName, tags: string[],
   files: FileInfo[],
   viewCount, likeCount, downloadCount, liked: boolean,
+  linkedRequestId: long | null,
   createdAt
 }
 

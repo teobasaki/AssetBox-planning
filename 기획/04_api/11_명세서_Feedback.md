@@ -8,7 +8,7 @@
 
 | # | Method | Path | Auth | 요약 |
 |---|---|---|---|---|
-| FB-1 | POST | `/api/feedback` | 익명 또는 USER | 피드백 보내기 (익명 허용) |
+| FB-1 | POST | `/api/feedback` | USER | 피드백 보내기 |
 | FB-2 | GET | `/api/admin/feedback` | ADMIN | 어드민 피드백 목록 |
 | FB-3 | PATCH | `/api/admin/feedback/{id}/read` | ADMIN | 읽음 처리 |
 | FB-4 | GET | `/api/admin/feedback/count-new` | ADMIN | 신규 피드백 수 (헤더 뱃지) |
@@ -17,15 +17,15 @@
 
 ## FB-1. POST `/api/feedback`
 
-**설명**: 운영자에게 의견 보내기. 익명 가능, 로그인 시 자동으로 userId/nickname 기록.
-**인증**: 익명 가능
+**설명**: 운영자에게 의견 보내기. 로그인 사용자만 작성 가능하며 userId/nickname을 자동 기록한다.
+**인증**: USER
 
 ### 요청
 
 ```http
 POST /api/feedback
 Content-Type: application/json
-Authorization: Bearer <jwt>   # 선택. 없으면 익명
+Authorization: Bearer <jwt>
 ```
 
 ```json
@@ -49,14 +49,14 @@ Authorization: Bearer <jwt>   # 선택. 없으면 익명
 }
 ```
 
-> 응답에 피드백 id 등을 노출하지 않음. 작성자 추적 회피 + 단순성.
+> 응답에 피드백 id 등을 노출하지 않음.
 
 ### 에러
 
 | HTTP | code | 발생 조건 |
 |---|---|---|
 | 400 | `VALIDATION_FAILED` | title/content 누락 / 길이 위반 |
-| 429 | `FEEDBACK_RATE_LIMITED` | (v1.1) 같은 IP 단시간 다회 |
+| 401 | `UNAUTHORIZED` | 토큰 없음 |
 
 ---
 
@@ -96,10 +96,10 @@ Authorization: Bearer <admin-jwt>
       },
       {
         "id": 30,
-        "title": "익명 피드백",
+        "title": "요청 게시판 UX 개선",
         "content": "...",
-        "userId": null,
-        "userNickname": null,
+        "userId": 18,
+        "userNickname": "박TA",
         "status": "NEW",
         "createdAt": "2026-05-23T11:00:00"
       }

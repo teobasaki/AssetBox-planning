@@ -20,13 +20,13 @@
 > 모르는 단어는 [`../00_overview/01_용어집.md`](../00_overview/01_용어집.md) 참고.
 > 비유: **민원 창구.** 시민(요청자)이 "이거 만들어 주세요" 신청서 제출 → 담당 공무원(TA) 배정 → 처리 중 → 완료 시 결과물 첨부. 단계마다 발송되는 안내문(DM 알림)이 끊기면 시민이 결과를 못 본다.
 
-> 짝꿍: **Post-A**. 같은 패턴이지만 라이프사이클이 다르고, 완료 시 Post-A에 의존(linked_post). 매주 1회 통합 점검.
+> 짝꿍: **Post-A**. 같은 패턴이지만 라이프사이클이 다르고, 완료 시 Post-A의 `linkedRequestId` 작성 흐름과 연결된다. 매주 1회 통합 점검.
 
 ---
 
 ## 1. 책임 한 줄
 
-`RequestPost` + `RequestComment` 의 CRUD, **상태 전이 5단계**, TA 배정, 완료 시 결과 게시글 연결, 상태 변경 DM 알림.
+`RequestPost` + `RequestComment` 의 CRUD, **요청자/assignee 중심 상태 흐름**, TA 본인 수락(assign), Post 작성 시 자동 완료, 상태 변경 DM 알림.
 
 ---
 
@@ -56,9 +56,10 @@ public interface RequestPostService {
     RequestResponse get(Long id);
     RequestResponse create(Long requesterId, RequestCreateRequest req);
     RequestResponse update(Long id, Long requesterId, RequestCreateRequest req);
-    RequestResponse changeStatus(Long id, Long requesterId, RequestStatus next);
-    RequestResponse assign(Long id, Long assigneeId);          // ADMIN
-    RequestResponse linkPost(Long id, Long requesterId, Long postId);
+    RequestResponse assign(Long id, Long currentUserId);       // USER 본인 수락
+    RequestResponse reject(Long id, Long currentUserId, String reason);
+    RequestResponse reopen(Long id, Long requesterId, RequestStatus targetStatus);
+    RequestResponse completeByLinkedPost(Long id, Long assigneeId, Long postId);
     void softDelete(Long id, Long requesterId);
     Page<RequestResponse> search(RequestSearchCriteria c, Pageable p);
 }
@@ -70,15 +71,14 @@ public interface RequestStatusService {
 
 ### 상태 전이 표 (RequestStatusService에서 강제)
 
-|       | REQUESTED | IN_REVIEW | IN_PROGRESS | COMPLETED | REJECTED |
-|-------|-----------|-----------|-------------|-----------|----------|
-| REQUESTED   | -         | A,SA      | A,SA(assign으로 자동) | -      | A,SA     |
-| IN_REVIEW   | A,SA      | -         | A,SA / assignee | -        | A,SA     |
-| IN_PROGRESS | -         | -         | -           | assignee | A,SA     |
-| COMPLETED   | -         | -         | -           | -        | -        |
-| REJECTED    | -         | -         | -           | -        | -        |
+| from | to | 트리거 | actor |
+|---|---|---|---|
+| REQUESTED | IN_PROGRESS | `/assign` | USER 본인 |
+| IN_PROGRESS | COMPLETED | Post 작성의 `linkedRequestId` | assignee 본인 |
+| REQUESTED/IN_PROGRESS | REJECTED | `/reject` | assignee 또는 요청자 |
+| REJECTED | REQUESTED | `/reopen` | 요청자 |
 
-A = ADMIN, SA = SUPER_ADMIN, assignee = 배정된 TA. 표에 없는 전이는 400 `REQUEST_STATUS_TRANSITION_INVALID`.
+`IN_REVIEW` 는 enum에는 남기지만 MVP에서는 별도 `/review` 단계 없이 v1.1에서 도입 검토.
 
 ---
 
@@ -86,36 +86,35 @@ A = ADMIN, SA = SUPER_ADMIN, assignee = 배정된 TA. 표에 없는 전이는 40
 
 - `UserService.requireExists(userId)` — assignee 검증, requester 검증
 - `UserService.getSystemUserId()` — 시스템 DM 발신자
-- `PostService.requireExists(postId)` — linkPost 시
+- `PostService` 가 저장한 postId — `completeByLinkedPost` 호출 시
 - `MessageService.send(fromUserId, toUserId, content)` — 상태 변경 알림
 
 ---
 
 ## 5. 단계별 작업 가이드
 
-### Day 1-2
+### M0 (5/22 ~ 5/25): 코드·문서 정독
 - [ ] `request/` 정독, RequestStatus enum 확인
 - [ ] DM/User/Post 담당과 합의: 시스템 발신자 ID 보장 시점·방식
 
-### Day 3-6: MVP
+### M1 (5/26 ~ 6/3): MVP
 - [ ] `create()` — status=REQUESTED, teamId 스냅샷
 - [ ] `update()` — status==REQUESTED 일 때만 허용 (그 외 400)
-- [ ] `assign()` — ADMIN/SUPER_ADMIN 만. assignee 검증, status 자동 IN_PROGRESS
-- [ ] `changeStatus()` — RequestStatusService 검증 후 transition
-- [ ] `linkPost()` — assignee 만, Post 미존재 404, 자동 COMPLETED
-
-### Day 7-9: 통합
+- [ ] `assign()` — USER 본인 수락. 본문 없음. 이미 assignee 있으면 409. status 자동 IN_PROGRESS
+- [ ] `completeByLinkedPost()` — Post 작성 트랜잭션에서 호출. assignee 본인 검증, 자동 COMPLETED
 - [ ] **상태 변경마다 DM 알림 호출** — `MessageService.send(system, requester, ...)`
 - [ ] 한 트랜잭션 안에서 호출: DM 실패 시 상태 전이도 롤백 (학습 효과 위해 일부러 일관 모드)
-- [ ] 통합 테스트 데이 — 한 요청을 처음부터 끝까지
+- [ ] 통합 테스트 데이(6/1) — 한 요청을 처음부터 끝까지
 
-### M2: SHOULD
+### M2 (6/4 ~ 6/11): SHOULD
+- [ ] `reject()` — assignee 또는 요청자만, DM 발송
+- [ ] `reopen()` — 요청자만, REJECTED → REQUESTED
 - [ ] RequestComment + 대댓글 (Comment 패턴 그대로)
 - [ ] 검색·필터 (status, assigneeId, requesterId, teamId)
 
-### M3
+### M3 (6/12 ~ 6/16)
 - [ ] 마감일 임박 알림은 v1.1 — 본 버전은 마감일 표시만
-- [ ] 어드민 통계: 평균 처리 시간 (Infra 협업)
+- [ ] 요청 흐름 로그/메트릭 점검 (Infra 협업)
 
 ---
 
@@ -127,11 +126,11 @@ A = ADMIN, SA = SUPER_ADMIN, assignee = 배정된 TA. 표에 없는 전이는 40
 - [ ] 트랜잭션: DM 실패 시 상태 변경 롤백
 
 ### R-05 배정
-- [ ] 비ADMIN 호출 403
-- [ ] assignee가 존재하지 않으면 404 `USER_NOT_FOUND`
-- [ ] 배정 시 status REQUESTED/IN_REVIEW → IN_PROGRESS 자동
+- [ ] 본문 없이 호출자 본인이 assignee
+- [ ] 이미 assignee 있으면 409 `REQUEST_ASSIGN_TAKEN`
+- [ ] 배정 시 status REQUESTED → IN_PROGRESS 자동
 
-### R-06 linkPost
+### R-09 자동 완료
 - [ ] assignee 가 아닌 사람 호출 403
 - [ ] postId 미존재 404
 - [ ] 성공 시 status=COMPLETED, DM 1통
@@ -144,6 +143,6 @@ A = ADMIN, SA = SUPER_ADMIN, assignee = 배정된 TA. 표에 없는 전이는 40
 |---|---|---|
 | `Message` 엔티티를 import 해서 직접 저장 | 도메인 경계 깨짐 | `MessageService.send` 만 사용 |
 | 상태 전이 검증을 컨트롤러에 흩뿌림 | 일관성 무너짐 | `RequestStatusService` 한 곳에서만 |
-| `Post` 엔티티 import 해서 linked_post 직접 다룸 | 책임 경계 깨짐 | linked_post 는 RequestPost 안에서만 변경, 존재 검증은 PostService |
+| `Post` 엔티티 import 해서 linkedPostId를 직접 다룸 | 책임 경계 깨짐 | linkedPostId 는 `completeByLinkedPost` 안에서만 변경 |
 | 시스템 발신자 user 존재 보장 안 됨 | DM 송신 실패 | `AdminBootstrapRunner` 가 시스템 유저 보장 (Infra 협업) |
 | DM 실패해도 상태 전이 성공 | 알림 누락 | 같은 트랜잭션에 묶음 (이번 학기 정책) |

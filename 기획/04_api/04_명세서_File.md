@@ -1,38 +1,34 @@
 # 04. API 명세서 — File
 
-> ⚠️ **2026-05-22 회의 반영분과 충돌 시** [`02_엔드포인트_목록_상태코드분리_수정본.md`](./02_엔드포인트_목록_상태코드분리_수정본.md) **이 진실의 단일 원본.** 이 파일은 회의 반영 핵심 변경만 머리에 박아둠. 본문 상세는 회의록과 합쳐서 읽기.
-
-
-> 담당 파트: **File-A (저장) + File-B (다운로드/로그)**
-> 베이스 경로: `/api/posts/{postId}/files/**`, `/api/admin/download-logs/**`
-> 파일 업로드는 Post 작성/수정 API의 multipart 안에 들어가므로 별도 엔드포인트는 없습니다. (`05_명세서_Post.md` 의 P-1 참고)
+> 담당 파트: **File (통합 도메인)**
+> 베이스 경로: `/api/files/**`
+> 파일 업로드 요청은 Post/User/Request API에서 multipart로 받고, 실제 저장/검증/메타데이터 관리는 FileService에 위임한다.
 
 | # | Method | Path | Auth | 요약 |
 |---|---|---|---|---|
-| F-1 | GET | `/api/posts/{postId}/files/{fileId}` | 익명 | 파일 다운로드 + 로그 |
-| F-2 | GET | `/api/admin/download-logs` | ADMIN | 로그 페이지 조회 |
-| F-3 | GET | `/api/admin/download-logs/posts/{postId}` | ADMIN | 게시글별 로그 |
-| F-4 | GET | `/api/admin/download-logs/files/{fileId}/count` | ADMIN | 파일별 다운로드 횟수 |
-| F-5 | GET | `/api/admin/download-logs/top-files` | ADMIN | 인기 파일 통계 |
+| F-1 | GET | `/api/files/{fileId}` | USER | 파일 다운로드/이미지 조회 |
+| F-2 | GET | `/api/files/{fileId}/meta` | USER | 파일 메타데이터 조회 |
+| F-3 | DELETE | `/api/files/{fileId}` | USER (소유자/관리자) | 파일 삭제 또는 비활성화 |
+
+> 다운로드 로그 및 파일 통계 API는 MVP 범위에서 제외한다. 필요하면 v1.1에서 `analytics` 또는 `audit` 도메인으로 분리한다.
 
 ---
 
-## F-1. GET `/api/posts/{postId}/files/{fileId}`
+## F-1. GET `/api/files/{fileId}`
 
-**설명**: 게시글에 첨부된 파일 다운로드. 비로그인도 가능 (회의록 결정). 다운로드 직후 `DownloadLog` 비동기 적재.
-**인증**: 익명 (로그인 시 userId 적재됨)
+**설명**: 에셋 파일, 게시글 썸네일, 프로필 이미지, 요청 참고 이미지를 공통 조회한다.
+**인증**: USER
 
 ### 요청
 
 ```http
-GET /api/posts/42/files/137
-User-Agent: Mozilla/5.0 ...
+GET /api/files/137
+Authorization: Bearer <jwt>
 ```
 
 | Path | 타입 | 비고 |
 |---|---|---|
-| postId | long | 대상 게시글 |
-| fileId | long | 대상 파일 (`postId` 와 일치해야 함) |
+| fileId | long | 대상 파일 |
 
 ### 응답 200
 
@@ -45,48 +41,31 @@ Cache-Control: no-store
 <binary>
 ```
 
-> `filename*=UTF-8''` 인코딩 형식으로 한글 파일명 깨짐 방지.
-
-### 부수효과
-
-- DownloadLog 1행 적재 (`@Async`):
-  - `user_id`: 로그인 사용자면 그 id, 아니면 null
-  - `post_id`, `file_id`, `original_name`
-  - `ip_address`: 요청 IP (X-Forwarded-For 우선)
-  - `user_agent`: 요청 User-Agent (512자 truncate)
+이미지 목적(`POST_THUMBNAIL`, `USER_AVATAR`, `REQUEST_REFERENCE`)은 브라우저 표시가 가능하도록 `inline` 정책을 선택할 수 있다. 기본은 파일 목적에 따라 FileService가 결정한다.
 
 ### 에러
 
 | HTTP | code | 발생 조건 |
 |---|---|---|
-| 404 | `POST_NOT_FOUND` | postId 미존재 |
+| 401 | `UNAUTHORIZED` | 토큰 없음 |
+| 403 | `FORBIDDEN` | 접근 권한 없는 파일 |
 | 404 | `FILE_NOT_FOUND` | fileId 미존재 |
-| 400 | `FILE_POST_MISMATCH` | fileId가 다른 게시글의 파일 |
-| 410 | `FILE_DELETED` | (정책 합의 시) 게시글 soft delete 후 다운로드 차단 |
+| 410 | `FILE_DELETED` | soft delete 또는 비활성 파일 |
 | 500 | `STORAGE_READ_FAILED` | 디스크/S3 읽기 실패 |
 
 ---
 
-## F-2. GET `/api/admin/download-logs`
+## F-2. GET `/api/files/{fileId}/meta`
 
-**설명**: 다운로드 로그 페이지 조회. 필터 결합.
-**인증**: ADMIN
+**설명**: 파일 메타데이터 조회. 다운로드/이미지 렌더링 전에 파일명·사이즈·purpose를 확인할 때 사용.
+**인증**: USER
 
 ### 요청
 
 ```http
-GET /api/admin/download-logs?page=0&size=20&fileId=137&userId=12&from=2026-05-20&to=2026-06-16
-Authorization: Bearer <admin-jwt>
+GET /api/files/137/meta
+Authorization: Bearer <jwt>
 ```
-
-| Query | 타입 | 비고 |
-|---|---|---|
-| page, size | int | 표준 |
-| fileId | long? | 특정 파일만 |
-| postId | long? | 특정 게시글만 |
-| userId | long? | 특정 사용자만 (비로그인 다운로드 조회 시 `userId=null` 쿼리는 미지원 — 별도 정책) |
-| from | date? | 시작일 (inclusive) |
-| to | date? | 종료일 (inclusive) |
 
 ### 응답 200
 
@@ -94,79 +73,51 @@ Authorization: Bearer <admin-jwt>
 {
   "success": true,
   "data": {
-    "items": [
-      {
-        "id": 9001,
-        "userId": 12,
-        "userNickname": "김TA",
-        "postId": 42,
-        "fileId": 137,
-        "originalName": "chair-low-poly.fbx",
-        "ipAddress": "10.0.0.42",
-        "userAgent": "Mozilla/5.0 ...",
-        "createdAt": "2026-05-21T14:30:15"
-      }
-    ],
-    "page": 0, "size": 20, "totalElements": 350, "totalPages": 18,
-    "first": true, "last": false
+    "id": 137,
+    "originalName": "chair-low-poly.fbx",
+    "extension": "fbx",
+    "sizeBytes": 524288,
+    "purpose": "ASSET",
+    "ownerId": 42,
+    "uploadedBy": 12,
+    "contentType": "application/octet-stream",
+    "createdAt": "2026-05-21T14:30:15"
   }
 }
 ```
 
-### 에러
-
-| HTTP | code | 발생 조건 |
-|---|---|---|
-| 400 | `DATE_RANGE_INVALID` | from > to |
-| 400 | `PAGINATION_SIZE_TOO_LARGE` | size > 50 |
-| 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | USER 호출 |
-
----
-
-## F-3. GET `/api/admin/download-logs/posts/{postId}`
-
-**설명**: 특정 게시글의 다운로드 로그 전체 (시간 DESC). 페이지네이션.
-**인증**: ADMIN
-
-### 요청
-
-```http
-GET /api/admin/download-logs/posts/42?page=0&size=50
-```
-
-### 응답 200
-
-`F-2` 와 동일 스키마.
+| 필드 | 의미 |
+|---|---|
+| purpose | `ASSET`, `POST_THUMBNAIL`, `USER_AVATAR`, `REQUEST_REFERENCE` |
+| ownerId | purpose별 소유 자원 id. 예: 게시글 id, 유저 id, 요청 id |
+| uploadedBy | 업로드한 사용자 id |
 
 ### 에러
 
 | HTTP | code | 발생 조건 |
 |---|---|---|
 | 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | |
-| 404 | `POST_NOT_FOUND` | |
+| 403 | `FORBIDDEN` | 접근 권한 없는 파일 |
+| 404 | `FILE_NOT_FOUND` | |
 
 ---
 
-## F-4. GET `/api/admin/download-logs/files/{fileId}/count`
+## F-3. DELETE `/api/files/{fileId}`
 
-**설명**: 특정 파일의 다운로드 총 횟수.
-**인증**: ADMIN
+**설명**: 파일 삭제 또는 비활성화. MVP에서는 DB row를 보존하는 soft delete를 권장한다.
+**인증**: USER (소유자 또는 ADMIN)
 
 ### 요청
 
 ```http
-GET /api/admin/download-logs/files/137/count
+DELETE /api/files/137
+Authorization: Bearer <jwt>
 ```
 
 ### 응답 200
 
 ```json
-{
-  "success": true,
-  "data": { "fileId": 137, "count": 248 }
-}
+{ "success": true, "data": null }
 ```
 
 ### 에러
@@ -174,78 +125,39 @@ GET /api/admin/download-logs/files/137/count
 | HTTP | code | 발생 조건 |
 |---|---|---|
 | 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | |
-| 404 | `FILE_NOT_FOUND` | (정책: 0 반환할지 404 낼지 합의. 본 명세는 404) |
+| 403 | `FORBIDDEN` | 소유자/관리자가 아님 |
+| 404 | `FILE_NOT_FOUND` | |
+| 409 | `FILE_IN_USE` | 현재 게시글/요청/프로필에서 사용 중이라 단독 삭제 불가 |
+| 500 | `STORAGE_DELETE_FAILED` | 저장소 삭제 실패 |
 
 ---
 
-## F-5. GET `/api/admin/download-logs/top-files`
+## 부록 — 업로드 서비스 컨트랙트
 
-**설명**: 다운로드 횟수 상위 파일.
-**인증**: ADMIN
-
-### 요청
-
-```http
-GET /api/admin/download-logs/top-files?limit=10&from=2026-05-20&to=2026-06-16
-```
-
-| Query | 타입 | 기본 | 비고 |
-|---|---|---|---|
-| limit | int | 10 | 최대 50 |
-| from | date? | - | |
-| to | date? | - | |
-
-### 응답 200
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "fileId": 137,
-      "originalName": "chair-low-poly.fbx",
-      "postId": 42,
-      "postTitle": "캐주얼 의자 (low poly)",
-      "count": 248
-    },
-    {
-      "fileId": 201,
-      "originalName": "stool.glb",
-      "postId": 78,
-      "postTitle": "스툴",
-      "count": 173
-    }
-  ]
-}
-```
-
-### 에러
-
-| HTTP | code | 발생 조건 |
-|---|---|---|
-| 400 | `DATE_RANGE_INVALID` | from > to |
-| 400 | `LIMIT_TOO_LARGE` | limit > 50 |
-| 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | |
-
----
-
-## 부록 — 업로드 컨트랙트 (Post 도메인에서 호출)
-
-업로드는 별도 엔드포인트가 없고 Post 작성/수정 시 호출됩니다. File-A의 서비스 계약:
+업로드는 별도 REST 엔드포인트가 없고 각 도메인 API에서 multipart로 받는다. File 도메인의 서비스 계약:
 
 ```java
-List<AssetFile> saveAndAttach(Long postId, List<MultipartFile> files, MultipartFile thumbnail);
+public interface FileService {
+    StoredFile save(FilePurpose purpose, Long ownerId, Long uploadedBy, MultipartFile file);
+    List<StoredFile> saveAll(FilePurpose purpose, Long ownerId, Long uploadedBy, List<MultipartFile> files);
+    FileResource load(Long fileId, Long requesterId);
+    FileResponse meta(Long fileId, Long requesterId);
+    void delete(Long fileId, Long requesterId);
+}
 ```
 
-| 입력 | 제약 | 위반 시 |
+| purpose | 업로드 주체 | 제약 |
 |---|---|---|
-| 에셋 파일 확장자 | `fbx, blend, obj, glb, gltf, zip` | 400 `FILE_EXTENSION_NOT_ALLOWED` |
-| 썸네일 확장자 | `png, jpg, jpeg` | 400 `FILE_EXTENSION_NOT_ALLOWED` |
-| 에셋 합계 사이즈 | ≤ 20MB | 400 `FILE_TOO_LARGE` |
-| 썸네일 사이즈 | ≤ 1MB | 400 `FILE_TOO_LARGE` |
-| 0바이트 파일 | 금지 | 400 `FILE_EMPTY` |
-| 게시글당 썸네일 수 | 최대 1 | 400 `THUMBNAIL_MULTIPLE_NOT_ALLOWED` |
+| `ASSET` | `POST /api/posts` 의 `files[]` | `fbx, blend, obj, glb, gltf, zip`, 합계 20MB 권장 |
+| `POST_THUMBNAIL` | `POST /api/posts` 의 `thumbnail` | `png, jpg, jpeg`, 1MB |
+| `USER_AVATAR` | `POST /api/users/me/avatar` | `png, jpg, jpeg`, 1MB |
+| `REQUEST_REFERENCE` | `POST /api/requests` 의 `referenceThumbnail` | `png, jpg, jpeg`, 1MB |
 
-자세한 동작 흐름은 `07_part_guides/02_File-A_저장.md` 참고.
+| 위반 | 에러 |
+|---|---|
+| 0바이트 파일 | 400 `FILE_EMPTY` |
+| 확장자 불일치 | 400 `FILE_EXTENSION_NOT_ALLOWED` |
+| 크기 초과 | 400 `FILE_TOO_LARGE` |
+| 저장 실패 | 500 `STORAGE_WRITE_FAILED` |
+
+저장 실패 시 이미 저장된 파일은 cleanup한다. 저장 경로는 직접 노출하지 않고 `fileId`를 통해서만 조회한다.

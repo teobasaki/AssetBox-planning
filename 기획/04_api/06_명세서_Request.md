@@ -1,11 +1,10 @@
 # 06. API 명세서 — Request (요청 게시판)
 
-> ⚠️ **2026-05-22 회의 반영분과 충돌 시** [`02_엔드포인트_목록_상태코드분리_수정본.md`](./02_엔드포인트_목록_상태코드분리_수정본.md) **이 진실의 단일 원본.** 이 파일은 회의 반영 핵심 변경만 머리에 박아둠. 본문 상세는 회의록과 합쳐서 읽기.
-
-
-> 담당 파트: **Post-B**
+> 담당 파트: **Request**
 > 베이스 경로: `/api/requests/**`
 > 댓글 엔드포인트는 `07_명세서_Comment.md` 참고.
+
+요청 게시판은 **요청자와 Assignee(TA) 중심**으로 흐른다. Admin은 이 흐름에 개입하지 않고 조회/모니터링만 한다.
 
 | # | Method | Path | Auth | 요약 |
 |---|---|---|---|---|
@@ -13,44 +12,50 @@
 | R-2 | GET | `/api/requests` | USER | 요청 목록 |
 | R-3 | GET | `/api/requests/{id}` | USER | 요청 상세 |
 | R-4 | PUT | `/api/requests/{id}` | USER (요청자) | 요청 수정 (REQUESTED 상태만) |
-| R-5 | PATCH | `/api/requests/{id}/status` | USER/ADMIN | 상태 전이 |
-| R-6 | PATCH | `/api/requests/{id}/assign` | ADMIN | TA 배정 |
-| R-7 | PATCH | `/api/requests/{id}/link-post` | USER (assignee) | 결과 게시글 연결 (자동 COMPLETED) |
-| R-8 | DELETE | `/api/requests/{id}` | USER (요청자) | 요청 삭제 (soft) |
+| R-5 | PATCH | `/api/requests/{id}/assign` | USER | TA가 본인을 assignee로 수락 |
+| R-6 | PATCH | `/api/requests/{id}/reject` | USER (assignee 또는 요청자) | 요청 반려 |
+| R-7 | PATCH | `/api/requests/{id}/reopen` | USER (요청자) | 반려 요청 재오픈 |
+| R-8 | DELETE | `/api/requests/{id}` | USER (요청자) | 요청 삭제 (REQUESTED 상태만 soft delete) |
+
+> 별도 `/status`, `/review`, `/link-post` 엔드포인트는 만들지 않는다. 완료는 `POST /api/posts` 의 `linkedRequestId` 로 자동 처리한다.
 
 ---
 
-## 상태 전이 다이어그램 (R-5 검증 규칙)
+## 상태 흐름
 
-```
-REQUESTED ──── (ADMIN) ──▶ IN_REVIEW ──── (ADMIN/assign) ──▶ IN_PROGRESS ──(assignee/linkPost)──▶ COMPLETED
-    │                          │                                 │
-    └────── (ADMIN) ───────────┴────────── (ADMIN) ──────────────┴─────▶ REJECTED
+```text
+REQUESTED(요청됨) → IN_REVIEW(검토중) → IN_PROGRESS(제작중) → COMPLETED(완료)
+                                      ↘ REJECTED(반려됨)
 ```
 
-| from | to | 허용 actor |
+MVP 권장 흐름은 `REQUESTED → IN_PROGRESS → COMPLETED` 직행이다. `IN_REVIEW` 는 enum에는 남기되 별도 `/review` API 없이 v1.1에서 도입 검토한다.
+
+| 전이 | 트리거 | actor |
 |---|---|---|
-| REQUESTED → IN_REVIEW | ADMIN, SUPER_ADMIN |
-| REQUESTED → IN_PROGRESS | ADMIN (assign과 함께, R-6 사용 권장) |
-| REQUESTED → REJECTED | ADMIN |
-| IN_REVIEW → IN_PROGRESS | ADMIN, assignee |
-| IN_REVIEW → REJECTED | ADMIN |
-| IN_REVIEW → REQUESTED | ADMIN (복원) |
-| IN_PROGRESS → COMPLETED | assignee (단, `link-post` 와 함께 R-7 사용 권장) |
-| IN_PROGRESS → REJECTED | ADMIN |
-| 그 외 전이 | 400 `REQUEST_STATUS_TRANSITION_INVALID` |
+| `REQUESTED → IN_PROGRESS` | `PATCH /assign` | TA(USER) 본인 |
+| `IN_PROGRESS → COMPLETED` | `POST /api/posts` 의 `linkedRequestId` | assignee 본인 |
+| `REQUESTED/IN_PROGRESS → REJECTED` | `PATCH /reject` | assignee 또는 요청자 |
+| `REJECTED → REQUESTED` | `PATCH /reopen` | 요청자 |
+
+상태 변경 성공 시 요청자에게 시스템 DM을 발송한다.
 
 ---
 
 ## R-1. POST `/api/requests`
 
-**설명**: 새 에셋 의뢰. status=REQUESTED, teamId 스냅샷.
+**설명**: 새 에셋 의뢰. status=`REQUESTED`, teamId 스냅샷.
 **인증**: USER
 
 ### 요청
 
-```json
-{
+```http
+POST /api/requests
+Content-Type: multipart/form-data
+Authorization: Bearer <jwt>
+```
+
+```
+data={
   "title": "캐주얼 의자가 필요해요",
   "content": "로우폴리. 카페 씬에 둘 작은 1인용 의자.",
   "assetType": "Furniture",
@@ -58,16 +63,18 @@ REQUESTED ──── (ADMIN) ──▶ IN_REVIEW ──── (ADMIN/assign) �
   "engine": "Blender",
   "deadline": "2026-06-15"
 }
+referenceThumbnail=@reference.png   # 선택
 ```
 
-| 필드 | 타입 | 제약 |
-|---|---|---|
-| title | string | NotBlank, max 100 |
-| content | string | NotBlank |
-| assetType | string? | max 60 |
-| preferredStyle | string? | max 60 |
-| engine | string? | max 60 |
-| deadline | date? | 오늘 이후 권장 (검증은 정책 합의) |
+| Part | 필드 | 타입 | 제약 |
+|---|---|---|---|
+| data | title | string | NotBlank, max 100 |
+| data | content | string | NotBlank |
+| data | assetType | string? | max 60 |
+| data | preferredStyle | string? | max 60 |
+| data | engine | string? | max 60 |
+| data | deadline | date? | 오늘 이후 권장 |
+| referenceThumbnail | binary? | image | png/jpg/jpeg, File purpose=`REQUEST_REFERENCE` |
 
 ### 응답 201
 
@@ -88,6 +95,7 @@ REQUESTED ──── (ADMIN) ──▶ IN_REVIEW ──── (ADMIN/assign) �
     "assigneeId": null,
     "assigneeNickname": null,
     "linkedPostId": null,
+    "referenceFileId": 301,
     "createdAt": "2026-05-21T14:30:15",
     "updatedAt": "2026-05-21T14:30:15"
   }
@@ -99,20 +107,22 @@ REQUESTED ──── (ADMIN) ──▶ IN_REVIEW ──── (ADMIN/assign) �
 | HTTP | code | 발생 조건 |
 |---|---|---|
 | 400 | `VALIDATION_FAILED` | title/content 누락, 길이 위반 |
-| 400 | `REQUEST_DEADLINE_PAST` | deadline이 과거 (정책 합의 시) |
+| 400 | `REQUEST_DEADLINE_PAST` | deadline이 과거 |
+| 400 | `FILE_EXTENSION_NOT_ALLOWED` | 참고 이미지 확장자 위반 |
 | 401 | `UNAUTHORIZED` | |
 
 ---
 
 ## R-2. GET `/api/requests`
 
-**설명**: 요청 목록.
+**설명**: 요청 목록. 운영자도 같은 목록 API로 모니터링한다.
 **인증**: USER
 
 ### 요청
 
 ```http
 GET /api/requests?page=0&size=20&status=IN_PROGRESS&assigneeId=18
+Authorization: Bearer <jwt>
 ```
 
 | Query | 타입 | 기본 | 비고 |
@@ -143,11 +153,16 @@ GET /api/requests?page=0&size=20&status=IN_PROGRESS&assigneeId=18
         "requesterNickname": "김TA",
         "assigneeId": 18,
         "assigneeNickname": "박TA",
+        "linkedPostId": null,
         "createdAt": "2026-05-21T14:30:15"
       }
     ],
-    "page": 0, "size": 20, "totalElements": 22, "totalPages": 2,
-    "first": true, "last": false
+    "page": 0,
+    "size": 20,
+    "totalElements": 22,
+    "totalPages": 2,
+    "first": true,
+    "last": false
   }
 }
 ```
@@ -164,18 +179,19 @@ GET /api/requests?page=0&size=20&status=IN_PROGRESS&assigneeId=18
 
 ## R-3. GET `/api/requests/{id}`
 
-**설명**: 요청 상세.
+**설명**: 요청 상세. `linkedPostId`, `referenceFileId` 포함.
 **인증**: USER
 
 ### 요청
 
 ```http
 GET /api/requests/11
+Authorization: Bearer <jwt>
 ```
 
 ### 응답 200
 
-`R-1` 의 응답 스키마와 동일 (`RequestDetailResponse`).
+`R-1` 의 응답 스키마와 동일.
 
 ### 에러
 
@@ -183,7 +199,7 @@ GET /api/requests/11
 |---|---|---|
 | 401 | `UNAUTHORIZED` | |
 | 404 | `REQUEST_NOT_FOUND` | |
-| 410 | `REQUEST_DELETED` | soft delete된 요청 (어드민만 조회 가능) |
+| 410 | `REQUEST_DELETED` | soft delete된 요청 |
 
 ---
 
@@ -194,16 +210,13 @@ GET /api/requests/11
 
 ### 요청
 
-```json
-{
-  "title": "캐주얼 의자가 필요해요 (추가 정보)",
-  "content": "...",
-  "assetType": "Furniture",
-  "preferredStyle": "Stylized",
-  "engine": "Blender",
-  "deadline": "2026-06-20"
-}
+```http
+PUT /api/requests/11
+Content-Type: multipart/form-data
+Authorization: Bearer <jwt>
 ```
+
+`R-1` 과 같은 multipart 구조.
 
 ### 응답 200
 
@@ -221,126 +234,110 @@ GET /api/requests/11
 
 ---
 
-## R-5. PATCH `/api/requests/{id}/status`
+## R-5. PATCH `/api/requests/{id}/assign`
 
-**설명**: 상태 전이. 위 매트릭스에 따른 actor 검증.
-**인증**: USER (특정 전이만) / ADMIN
+**설명**: TA가 본인을 assignee로 등록한다. 본문을 받지 않고 호출자가 자동 assignee가 된다. 성공 시 `IN_PROGRESS`.
+**인증**: USER
 
 ### 요청
 
-```json
-{ "status": "IN_REVIEW" }
+```http
+PATCH /api/requests/11/assign
+Authorization: Bearer <jwt>
 ```
 
 ### 응답 200
 
-`R-1` 응답 (status 변경된 상태).
+`R-1` 응답 (`assigneeId=현재 사용자`, `status=IN_PROGRESS`).
 
 ### 부수효과
 
-- 상태 변경 성공 시 **요청자에게 시스템 DM 1통** 발송 (`MessageService.send(systemUserId, requesterId, "...")`)
-- DM 송신이 실패하면 상태 변경도 롤백 (학습 효과상 같은 트랜잭션)
+- 요청자에게 시스템 DM: "`{assigneeNickname}`님이 요청을 수락했습니다."
 
 ### 에러
 
 | HTTP | code | 발생 조건 |
 |---|---|---|
-| 400 | `REQUEST_STATUS_UNKNOWN` | status 값 enum 아님 |
-| 400 | `REQUEST_STATUS_TRANSITION_INVALID` | 표 외 전이 |
 | 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | 권한 없는 actor (예: 일반 USER가 IN_REVIEW → IN_PROGRESS 시도) |
 | 404 | `REQUEST_NOT_FOUND` | |
-| 409 | `REQUEST_COMPLETED_LOCKED` | 이미 COMPLETED/REJECTED 인데 변경 시도 |
+| 409 | `REQUEST_ASSIGN_TAKEN` | 이미 다른 assignee가 있음 |
+| 409 | `REQUEST_ASSIGN_SELF_DUPLICATED` | 본인이 이미 assignee |
+| 409 | `REQUEST_COMPLETED_LOCKED` | 이미 COMPLETED |
 
 ---
 
-## R-6. PATCH `/api/requests/{id}/assign`
+## R-6. PATCH `/api/requests/{id}/reject`
 
-**설명**: TA 배정. ADMIN 전용. 배정 시 자동으로 IN_PROGRESS (REQUESTED/IN_REVIEW 이었던 경우).
-**인증**: ADMIN
-
-### 요청
-
-```json
-{ "assigneeId": 18 }
-```
-
-### 응답 200
-
-`R-1` 응답.
-
-### 부수효과
-
-- 요청자에게 DM: "요청이 박TA에게 배정되었습니다."
-- assignee에게 DM: "[요청 #11] 캐주얼 의자가 필요해요 — 작업 부탁드립니다." (선택)
-
-### 에러
-
-| HTTP | code | 발생 조건 |
-|---|---|---|
-| 400 | `VALIDATION_FAILED` | assigneeId 누락 |
-| 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | USER 호출 |
-| 404 | `REQUEST_NOT_FOUND` | |
-| 404 | `USER_NOT_FOUND` | assigneeId 미존재 |
-| 409 | `REQUEST_COMPLETED_LOCKED` | 이미 COMPLETED/REJECTED |
-
----
-
-## R-7. PATCH `/api/requests/{id}/link-post`
-
-**설명**: 결과물(게시글) 연결 + 자동 COMPLETED. assignee만 호출.
-**인증**: USER (assignee)
+**설명**: 요청 반려. assignee 또는 요청자가 사유를 남기고 `REJECTED`로 바꾼다.
+**인증**: USER (assignee 또는 요청자)
 
 ### 요청
-
-```json
-{ "postId": 42 }
-```
-
-### 응답 200
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": 11,
-    "title": "캐주얼 의자가 필요해요",
-    "...": "...",
-    "status": "COMPLETED",
-    "linkedPostId": 42,
-    "updatedAt": "2026-05-23T11:00:00"
-  }
+  "reason": "현재 작업 범위에서 처리하기 어렵습니다."
 }
 ```
 
+### 응답 200
+
+`R-1` 응답 (`status=REJECTED`).
+
 ### 부수효과
 
-- 요청자에게 DM: "요청이 완료되었습니다 → /posts/42"
+- 요청자에게 시스템 DM 발송
 
 ### 에러
 
 | HTTP | code | 발생 조건 |
 |---|---|---|
-| 400 | `VALIDATION_FAILED` | postId 누락 |
-| 400 | `REQUEST_LINK_NOT_IN_PROGRESS` | status가 IN_PROGRESS 아님 |
+| 400 | `VALIDATION_FAILED` | reason 길이 위반 |
 | 401 | `UNAUTHORIZED` | |
-| 403 | `FORBIDDEN` | assignee 아님 |
+| 403 | `REQUEST_REJECT_FORBIDDEN` | assignee/요청자가 아님 |
 | 404 | `REQUEST_NOT_FOUND` | |
-| 404 | `POST_NOT_FOUND` | |
-| 409 | `REQUEST_ALREADY_COMPLETED` | 이미 COMPLETED |
+| 409 | `REQUEST_COMPLETED_LOCKED` | 이미 COMPLETED |
+
+---
+
+## R-7. PATCH `/api/requests/{id}/reopen`
+
+**설명**: 반려된 요청을 요청자가 다시 연다. 기본 복귀 상태는 `REQUESTED`.
+**인증**: USER (요청자)
+
+### 요청
+
+```json
+{
+  "targetStatus": "REQUESTED"
+}
+```
+
+### 응답 200
+
+`R-1` 응답 (`status=REQUESTED`, assignee 초기화 여부는 정책에 맞춰 구현).
+
+### 에러
+
+| HTTP | code | 발생 조건 |
+|---|---|---|
+| 400 | `REQUEST_REOPEN_TARGET_INVALID` | targetStatus가 REQUESTED/IN_REVIEW가 아님 |
+| 401 | `UNAUTHORIZED` | |
+| 403 | `FORBIDDEN` | 요청자 아님 |
+| 404 | `REQUEST_NOT_FOUND` | |
+| 409 | `REQUEST_NOT_REJECTED` | REJECTED 상태가 아님 |
 
 ---
 
 ## R-8. DELETE `/api/requests/{id}`
 
-**설명**: 요청 삭제. soft. 요청자 본인만.
+**설명**: 요청 삭제. `REQUESTED` 상태에서 요청자 본인만 soft delete.
 **인증**: USER (요청자)
 
 ### 요청
 
 ```http
 DELETE /api/requests/11
+Authorization: Bearer <jwt>
 ```
 
 ### 응답 200
@@ -356,4 +353,27 @@ DELETE /api/requests/11
 | 401 | `UNAUTHORIZED` | |
 | 403 | `FORBIDDEN` | 요청자 아님 |
 | 404 | `REQUEST_NOT_FOUND` | |
-| 409 | `REQUEST_IN_PROGRESS_LOCKED` | IN_PROGRESS / COMPLETED 인 경우 삭제 거부 |
+| 409 | `REQUEST_IN_PROGRESS_LOCKED` | REQUESTED가 아닌 상태 |
+
+---
+
+## 부록 — Post 작성에 의한 자동 완료 컨트랙트
+
+Request 도메인은 Post 도메인이 호출할 내부 메서드를 제공한다.
+
+```java
+RequestResponse completeByLinkedPost(Long requestId, Long assigneeId, Long linkedPostId);
+```
+
+검증:
+
+- request 존재
+- request.assigneeId == assigneeId
+- request.status == `IN_PROGRESS`
+- linkedPostId 1회만 설정 가능
+
+성공 시:
+
+- request.status = `COMPLETED`
+- request.linkedPostId = linkedPostId
+- 요청자에게 시스템 DM: "`요청이 완료되었습니다 → /posts/{linkedPostId}`"
